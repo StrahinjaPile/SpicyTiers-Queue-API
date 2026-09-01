@@ -22,7 +22,7 @@ function corsHeaders() {
 
 function json(data, status = 200) {
     return new Response(
-        JSON.stringify(data),
+        JSON.stringify(data, null, 2),
         {
             status,
             headers: corsHeaders()
@@ -97,24 +97,41 @@ export default {
             // =========================
 
             if (path === "/servers" && request.method === "GET") {
-                const result = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        name,
-                        region,
-                        address,
-                        online,
-                        players,
-                        max_players,
-                        last_heartbeat
-                    FROM servers
-                    ORDER BY region, name
-                `).all();
+                try {
+                    if (!env.DB) {
+                        return json({
+                            success: false,
+                            error: "D1 database binding 'DB' is missing"
+                        }, 500);
+                    }
 
-                return json({
-                    success: true,
-                    servers: result.results || []
-                });
+                    const result = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            name,
+                            region,
+                            address,
+                            online,
+                            players,
+                            max_players,
+                            last_heartbeat
+                        FROM servers
+                        ORDER BY region, name
+                    `).all();
+
+                    return json({
+                        success: true,
+                        servers: result.results || []
+                    });
+                } catch (error) {
+                    console.error("SERVERS ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "D1 query failed",
+                        details: error.message
+                    }, 500);
+                }
             }
 
             // =========================
@@ -181,30 +198,40 @@ export default {
                 // CHECK EXISTING QUEUE
                 // -------------------------
 
-                const existing = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        uuid,
-                        username,
-                        mode,
-                        ranked,
-                        region,
-                        elo,
-                        joined_at
-                    FROM queue
-                    WHERE uuid = ?
-                      AND mode = ?
-                    LIMIT 1
-                `)
-                    .bind(uuid, mode)
-                    .first();
+                try {
+                    const existing = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            uuid,
+                            username,
+                            mode,
+                            ranked,
+                            region,
+                            elo,
+                            joined_at
+                        FROM queue
+                        WHERE uuid = ?
+                          AND mode = ?
+                        LIMIT 1
+                    `)
+                        .bind(uuid, mode)
+                        .first();
 
-                if (existing) {
+                    if (existing) {
+                        return json({
+                            success: false,
+                            error: "Already in queue",
+                            queue: existing
+                        }, 409);
+                    }
+                } catch (error) {
+                    console.error("QUEUE CHECK ERROR:", error);
+
                     return json({
                         success: false,
-                        error: "Already in queue",
-                        queue: existing
-                    }, 409);
+                        error: "D1 query failed",
+                        details: error.message
+                    }, 500);
                 }
 
                 // -------------------------
@@ -223,23 +250,35 @@ export default {
                 // CHECK SERVER
                 // -------------------------
 
-                const server = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        name,
-                        region,
-                        address,
-                        online,
-                        players,
-                        max_players
-                    FROM servers
-                    WHERE region = ?
-                      AND online = 1
-                    ORDER BY players ASC
-                    LIMIT 1
-                `)
-                    .bind(selectedRegion)
-                    .first();
+                let server;
+
+                try {
+                    server = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            name,
+                            region,
+                            address,
+                            online,
+                            players,
+                            max_players
+                        FROM servers
+                        WHERE region = ?
+                          AND online = 1
+                        ORDER BY players ASC
+                        LIMIT 1
+                    `)
+                        .bind(selectedRegion)
+                        .first();
+                } catch (error) {
+                    console.error("SERVER CHECK ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "D1 query failed",
+                        details: error.message
+                    }, 500);
+                }
 
                 if (!server) {
                     return json({
@@ -255,50 +294,72 @@ export default {
 
                 const joinedAt = Math.floor(Date.now() / 1000);
 
-                await env.DB.prepare(`
-                    INSERT INTO queue (
-                        uuid,
-                        username,
-                        mode,
-                        ranked,
-                        region,
-                        elo,
-                        joined_at
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                `)
-                    .bind(
-                        uuid,
-                        username,
-                        mode,
-                        1,
-                        selectedRegion,
-                        elo,
-                        joinedAt
-                    )
-                    .run();
+                try {
+                    await env.DB.prepare(`
+                        INSERT INTO queue (
+                            uuid,
+                            username,
+                            mode,
+                            ranked,
+                            region,
+                            elo,
+                            joined_at
+                        )
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                    `)
+                        .bind(
+                            uuid,
+                            username,
+                            mode,
+                            1,
+                            selectedRegion,
+                            elo,
+                            joinedAt
+                        )
+                        .run();
+                } catch (error) {
+                    console.error("QUEUE INSERT ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "Failed to join queue",
+                        details: error.message
+                    }, 500);
+                }
 
                 // -------------------------
                 // GET INSERTED QUEUE ENTRY
                 // -------------------------
 
-                const queueEntry = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        uuid,
-                        username,
-                        mode,
-                        ranked,
-                        region,
-                        elo,
-                        joined_at
-                    FROM queue
-                    WHERE uuid = ?
-                      AND mode = ?
-                    LIMIT 1
-                `)
-                    .bind(uuid, mode)
-                    .first();
+                let queueEntry;
+
+                try {
+                    queueEntry = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            uuid,
+                            username,
+                            mode,
+                            ranked,
+                            region,
+                            elo,
+                            joined_at
+                        FROM queue
+                        WHERE uuid = ?
+                          AND mode = ?
+                        LIMIT 1
+                    `)
+                        .bind(uuid, mode)
+                        .first();
+                } catch (error) {
+                    console.error("QUEUE FETCH ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "Failed to fetch queue entry",
+                        details: error.message
+                    }, 500);
+                }
 
                 return json({
                     success: true,
@@ -346,23 +407,35 @@ export default {
                     }, 400);
                 }
 
-                const existing = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        uuid,
-                        username,
-                        mode,
-                        ranked,
-                        region,
-                        elo,
-                        joined_at
-                    FROM queue
-                    WHERE uuid = ?
-                      AND mode = ?
-                    LIMIT 1
-                `)
-                    .bind(uuid, mode)
-                    .first();
+                let existing;
+
+                try {
+                    existing = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            uuid,
+                            username,
+                            mode,
+                            ranked,
+                            region,
+                            elo,
+                            joined_at
+                        FROM queue
+                        WHERE uuid = ?
+                          AND mode = ?
+                        LIMIT 1
+                    `)
+                        .bind(uuid, mode)
+                        .first();
+                } catch (error) {
+                    console.error("QUEUE LEAVE CHECK ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "D1 query failed",
+                        details: error.message
+                    }, 500);
+                }
 
                 if (!existing) {
                     return json({
@@ -371,13 +444,23 @@ export default {
                     }, 404);
                 }
 
-                await env.DB.prepare(`
-                    DELETE FROM queue
-                    WHERE uuid = ?
-                      AND mode = ?
-                `)
-                    .bind(uuid, mode)
-                    .run();
+                try {
+                    await env.DB.prepare(`
+                        DELETE FROM queue
+                        WHERE uuid = ?
+                          AND mode = ?
+                    `)
+                        .bind(uuid, mode)
+                        .run();
+                } catch (error) {
+                    console.error("QUEUE DELETE ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "Failed to leave queue",
+                        details: error.message
+                    }, 500);
+                }
 
                 return json({
                     success: true,
@@ -411,23 +494,35 @@ export default {
                     }, 400);
                 }
 
-                const queueEntry = await env.DB.prepare(`
-                    SELECT
-                        id,
-                        uuid,
-                        username,
-                        mode,
-                        ranked,
-                        region,
-                        elo,
-                        joined_at
-                    FROM queue
-                    WHERE uuid = ?
-                      AND mode = ?
-                    LIMIT 1
-                `)
-                    .bind(uuid, mode)
-                    .first();
+                let queueEntry;
+
+                try {
+                    queueEntry = await env.DB.prepare(`
+                        SELECT
+                            id,
+                            uuid,
+                            username,
+                            mode,
+                            ranked,
+                            region,
+                            elo,
+                            joined_at
+                        FROM queue
+                        WHERE uuid = ?
+                          AND mode = ?
+                        LIMIT 1
+                    `)
+                        .bind(uuid, mode)
+                        .first();
+                } catch (error) {
+                    console.error("QUEUE STATUS ERROR:", error);
+
+                    return json({
+                        success: false,
+                        error: "D1 query failed",
+                        details: error.message
+                    }, 500);
+                }
 
                 if (!queueEntry) {
                     return json({
@@ -439,6 +534,7 @@ export default {
                 }
 
                 const now = Math.floor(Date.now() / 1000);
+
                 const queueTime = Math.max(
                     0,
                     now - queueEntry.joined_at
@@ -466,11 +562,12 @@ export default {
             }, 404);
 
         } catch (error) {
-            console.error(error);
+            console.error("GLOBAL ERROR:", error);
 
             return json({
                 success: false,
-                error: "Internal server error"
+                error: "Internal server error",
+                details: error.message
             }, 500);
         }
     }
