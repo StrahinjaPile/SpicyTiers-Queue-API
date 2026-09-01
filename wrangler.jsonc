@@ -1,5 +1,13 @@
 {
   "name": "spicytiers-ranked",
   "main": "src/index.js",
-  "compatibility_date": "2026-09-01"
+  "compatibility_date": "2026-09-01",
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "spicytiers-ranked-db",
+      "database_id": "3f1c8b2c-0335-4049-a5fe-400aa9bd6d12"
+    }
+  ]
 }
