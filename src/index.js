@@ -1,4 +1,3 @@
-```js
 const MODES = [
     "sword",
     "axe",
@@ -476,4 +475,3 @@ export default {
         }
     }
 };
-```
