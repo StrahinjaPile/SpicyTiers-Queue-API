@@ -330,7 +330,7 @@ async function ensurePlayer(
 
         DO UPDATE SET
             username = excluded.username,
-            updated_at = CURRENT_TIMESTAMP
+            updated_at = unixepoch()
     `)
         .bind(
             uuid,
