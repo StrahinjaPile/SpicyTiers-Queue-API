@@ -23,30 +23,40 @@ const ELO_CHANGE = 25;
 // =========================
 
 function json(data, status = 200) {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type, Authorization"
+  return new Response(
+    JSON.stringify(data),
+    {
+      status,
+      headers: {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization"
+      }
     }
-  });
+  );
 }
 
 
 function normalizeMode(mode) {
-  return String(mode || "").toLowerCase().trim();
+  return String(mode || "")
+    .toLowerCase()
+    .trim();
 }
 
 
 function validMode(mode) {
-  return MODES.includes(normalizeMode(mode));
+  return MODES.includes(
+    normalizeMode(mode)
+  );
 }
 
 
 function normalizeRegion(region) {
-  if (!region) return "auto";
+  if (!region) {
+    return "auto";
+  }
 
   return String(region)
     .toLowerCase()
@@ -99,13 +109,16 @@ function generateMatchId() {
 // =========================
 
 async function cleanupStaleData(env) {
-  const now = Math.floor(Date.now() / 1000);
+  const now =
+    Math.floor(Date.now() / 1000);
 
   await env.DB.prepare(`
     DELETE FROM queue
     WHERE joined_at < ?
   `)
-    .bind(now - QUEUE_TIMEOUT)
+    .bind(
+      now - QUEUE_TIMEOUT
+    )
     .run();
 
   await env.DB.prepare(`
@@ -113,7 +126,9 @@ async function cleanupStaleData(env) {
     WHERE status = 'waiting'
       AND created_at < ?
   `)
-    .bind(now - MATCH_TIMEOUT)
+    .bind(
+      now - MATCH_TIMEOUT
+    )
     .run();
 }
 
@@ -122,7 +137,11 @@ async function cleanupStaleData(env) {
 // PLAYER
 // =========================
 
-async function getPlayerStats(env, uuid, mode) {
+async function getPlayerStats(
+  env,
+  uuid,
+  mode
+) {
   return await env.DB.prepare(`
     SELECT
       uuid,
@@ -135,12 +154,19 @@ async function getPlayerStats(env, uuid, mode) {
     WHERE uuid = ?
       AND mode = ?
   `)
-    .bind(uuid, mode)
+    .bind(
+      uuid,
+      mode
+    )
     .first();
 }
 
 
-async function ensurePlayer(env, uuid, username) {
+async function ensurePlayer(
+  env,
+  uuid,
+  username
+) {
   await env.DB.prepare(`
     INSERT INTO players (
       uuid,
@@ -153,7 +179,10 @@ async function ensurePlayer(env, uuid, username) {
       username = excluded.username,
       updated_at = unixepoch()
   `)
-    .bind(uuid, username)
+    .bind(
+      uuid,
+      username
+    )
     .run();
 
   for (const mode of MODES) {
@@ -189,44 +218,74 @@ async function findMatch(
   elo,
   region
 ) {
-  const now = Math.floor(Date.now() / 1000);
+  const now =
+    Math.floor(Date.now() / 1000);
 
-  const candidates = await env.DB.prepare(`
-    SELECT
-      id,
+  console.log(
+    "[MATCHMAKING] Searching opponent:",
+    {
       uuid,
-      username,
       mode,
-      ranked,
-      region,
       elo,
-      joined_at
-    FROM queue
-    WHERE mode = ?
-      AND uuid != ?
-      AND joined_at >= ?
-    ORDER BY joined_at ASC
-  `)
-    .bind(
-      mode,
-      uuid,
-      now - QUEUE_TIMEOUT
-    )
-    .all();
+      region
+    }
+  );
 
-  for (const candidate of candidates.results || []) {
-    const candidateRegion = normalizeRegion(candidate.region);
+  const candidates =
+    await env.DB.prepare(`
+      SELECT
+        id,
+        uuid,
+        username,
+        mode,
+        ranked,
+        region,
+        elo,
+        joined_at
+      FROM queue
+      WHERE mode = ?
+        AND uuid != ?
+        AND joined_at >= ?
+      ORDER BY joined_at ASC
+    `)
+      .bind(
+        mode,
+        uuid,
+        now - QUEUE_TIMEOUT
+      )
+      .all();
+
+  console.log(
+    "[MATCHMAKING] Candidates:",
+    candidates.results?.length || 0
+  );
+
+  for (
+    const candidate
+    of candidates.results || []
+  ) {
+    const candidateRegion =
+      normalizeRegion(
+        candidate.region
+      );
 
     if (
       region !== "auto" &&
       candidateRegion !== "auto" &&
       region !== candidateRegion
     ) {
+      console.log(
+        "[MATCHMAKING] Region mismatch:",
+        region,
+        candidateRegion
+      );
+
       continue;
     }
 
     const waited =
-      now - Number(candidate.joined_at);
+      now -
+      Number(candidate.joined_at);
 
     let allowedDifference = 100;
 
@@ -246,14 +305,40 @@ async function findMatch(
       allowedDifference = 1000;
     }
 
-    const eloDifference = Math.abs(
-      Number(elo) - Number(candidate.elo)
+    const eloDifference =
+      Math.abs(
+        Number(elo) -
+        Number(candidate.elo)
+      );
+
+    console.log(
+      "[MATCHMAKING] Candidate:",
+      {
+        uuid: candidate.uuid,
+        username: candidate.username,
+        elo: Number(candidate.elo),
+        eloDifference,
+        allowedDifference,
+        waited
+      }
     );
 
-    if (eloDifference <= allowedDifference) {
+    if (
+      eloDifference <=
+      allowedDifference
+    ) {
+      console.log(
+        "[MATCHMAKING] OPPONENT FOUND:",
+        candidate.uuid
+      );
+
       return candidate;
     }
   }
+
+  console.log(
+    "[MATCHMAKING] No opponent found."
+  );
 
   return null;
 }
@@ -263,8 +348,12 @@ async function findMatch(
 // SERVER
 // =========================
 
-async function findServer(env, region) {
-  const now = Math.floor(Date.now() / 1000);
+async function findServer(
+  env,
+  region
+) {
+  const now =
+    Math.floor(Date.now() / 1000);
 
   let query = `
     SELECT
@@ -280,7 +369,10 @@ async function findServer(env, region) {
     FROM servers
     WHERE online = 1
       AND last_heartbeat >= ?
-      AND (players + reserved_players) < max_players
+      AND (
+        players +
+        COALESCE(reserved_players, 0)
+      ) < max_players
   `;
 
   const params = [
@@ -303,10 +395,18 @@ async function findServer(env, region) {
     LIMIT 1
   `;
 
-  return await env.DB
-    .prepare(query)
-    .bind(...params)
-    .first();
+  const server =
+    await env.DB
+      .prepare(query)
+      .bind(...params)
+      .first();
+
+  console.log(
+    "[SERVER] findServer:",
+    server || "NONE"
+  );
+
+  return server;
 }
 
 
@@ -320,83 +420,227 @@ async function createMatch(
   opponent,
   server
 ) {
-  const matchId = generateMatchId();
+  try {
+    console.log(
+      "[MATCH] ========================"
+    );
 
-  const now = Math.floor(Date.now() / 1000);
+    console.log(
+      "[MATCH] Creating match..."
+    );
 
-  await env.DB.prepare(`
-    DELETE FROM queue
-    WHERE uuid = ?
-      AND mode = ?
-  `)
-    .bind(
-      player.uuid,
-      player.mode
-    )
-    .run();
+    console.log(
+      "[MATCH] Player:",
+      player
+    );
 
-  await env.DB.prepare(`
-    DELETE FROM queue
-    WHERE uuid = ?
-      AND mode = ?
-  `)
-    .bind(
-      opponent.uuid,
-      opponent.mode
-    )
-    .run();
+    console.log(
+      "[MATCH] Opponent:",
+      opponent
+    );
 
-  await env.DB.prepare(`
-    INSERT INTO matches (
-      id,
-      mode,
-      region,
-      player1_uuid,
-      player1_username,
-      player2_uuid,
-      player2_username,
-      player1_elo,
-      player2_elo,
-      server_id,
-      status,
-      created_at
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?)
-  `)
-    .bind(
-      matchId,
-      player.mode,
+    console.log(
+      "[MATCH] Server:",
+      server
+    );
 
+    if (!player) {
+      throw new Error(
+        "createMatch: player is missing"
+      );
+    }
+
+    if (!opponent) {
+      throw new Error(
+        "createMatch: opponent is missing"
+      );
+    }
+
+    if (!server) {
+      throw new Error(
+        "createMatch: server is missing"
+      );
+    }
+
+    if (!player.uuid) {
+      throw new Error(
+        "createMatch: player.uuid is missing"
+      );
+    }
+
+    if (!opponent.uuid) {
+      throw new Error(
+        "createMatch: opponent.uuid is missing"
+      );
+    }
+
+    if (!player.mode) {
+      throw new Error(
+        "createMatch: player.mode is missing"
+      );
+    }
+
+    if (!server.id) {
+      throw new Error(
+        "createMatch: server.id is missing"
+      );
+    }
+
+    const matchId =
+      generateMatchId();
+
+    const now =
+      Math.floor(Date.now() / 1000);
+
+    const matchRegion =
       player.region !== "auto"
         ? player.region
         : opponent.region !== "auto"
           ? opponent.region
-          : server.region,
+          : normalizeRegion(
+              server.region
+            );
 
-      player.uuid,
-      player.username,
+    console.log(
+      "[MATCH] Match ID:",
+      matchId
+    );
 
-      opponent.uuid,
-      opponent.username,
+    console.log(
+      "[MATCH] Region:",
+      matchRegion
+    );
 
-      Number(player.elo),
-      Number(opponent.elo),
+    console.log(
+      "[MATCH] Running atomic D1 batch..."
+    );
 
-      server.id,
-      now
-    )
-    .run();
+    const statements = [
 
-  await env.DB.prepare(`
-    UPDATE servers
-    SET reserved_players =
-      reserved_players + 2
-    WHERE id = ?
-  `)
-    .bind(server.id)
-    .run();
+      // Remove player 1
+      env.DB.prepare(`
+        DELETE FROM queue
+        WHERE uuid = ?
+          AND mode = ?
+      `)
+        .bind(
+          player.uuid,
+          player.mode
+        ),
 
-  return matchId;
+      // Remove player 2
+      env.DB.prepare(`
+        DELETE FROM queue
+        WHERE uuid = ?
+          AND mode = ?
+      `)
+        .bind(
+          opponent.uuid,
+          opponent.mode
+        ),
+
+      // Create match
+      env.DB.prepare(`
+        INSERT INTO matches (
+          id,
+          mode,
+          region,
+          player1_uuid,
+          player1_username,
+          player2_uuid,
+          player2_username,
+          player1_elo,
+          player2_elo,
+          server_id,
+          status,
+          created_at
+        )
+        VALUES (
+          ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'waiting', ?
+        )
+      `)
+        .bind(
+          matchId,
+
+          player.mode,
+
+          matchRegion,
+
+          player.uuid,
+          player.username,
+
+          opponent.uuid,
+          opponent.username,
+
+          Number(player.elo),
+          Number(opponent.elo),
+
+          Number(server.id),
+
+          now
+        ),
+
+      // Reserve two server slots
+      env.DB.prepare(`
+        UPDATE servers
+        SET reserved_players =
+          COALESCE(reserved_players, 0) + 2
+        WHERE id = ?
+      `)
+        .bind(
+          Number(server.id)
+        )
+    ];
+
+    const batchResult =
+      await env.DB.batch(
+        statements
+      );
+
+    console.log(
+      "[MATCH] D1 batch successful:",
+      batchResult
+    );
+
+    console.log(
+      "[MATCH] Match created:",
+      matchId
+    );
+
+    return matchId;
+
+  } catch (error) {
+
+    console.error(
+      "[MATCH] ========================"
+    );
+
+    console.error(
+      "[MATCH] createMatch FAILED"
+    );
+
+    console.error(
+      "[MATCH] Error name:",
+      error?.name
+    );
+
+    console.error(
+      "[MATCH] Error message:",
+      error?.message
+    );
+
+    console.error(
+      "[MATCH] Error stack:",
+      error?.stack
+    );
+
+    console.error(
+      "[MATCH] Error:",
+      error
+    );
+
+    throw error;
+  }
 }
 
 
@@ -404,8 +648,12 @@ async function createMatch(
 // GET MATCH
 // =========================
 
-async function getMatchByPlayer(env, uuid) {
-  const now = Math.floor(Date.now() / 1000);
+async function getMatchByPlayer(
+  env,
+  uuid
+) {
+  const now =
+    Math.floor(Date.now() / 1000);
 
   return await env.DB.prepare(`
     SELECT *
@@ -428,22 +676,42 @@ async function getMatchByPlayer(env, uuid) {
 }
 
 
-async function buildMatchResponse(env, match) {
+async function buildMatchResponse(
+  env,
+  match
+) {
+  if (!match) {
+    throw new Error(
+      "buildMatchResponse: match is null"
+    );
+  }
+
   let server = null;
 
   if (match.server_id) {
-    server = await env.DB.prepare(`
-      SELECT
-        id,
-        name,
-        region,
-        address
-      FROM servers
-      WHERE id = ?
-    `)
-      .bind(match.server_id)
-      .first();
+    server =
+      await env.DB.prepare(`
+        SELECT
+          id,
+          name,
+          region,
+          address
+        FROM servers
+        WHERE id = ?
+      `)
+        .bind(
+          Number(match.server_id)
+        )
+        .first();
   }
+
+  console.log(
+    "[MATCH] Building response:",
+    {
+      matchId: match.id,
+      server
+    }
+  );
 
   return {
     success: true,
@@ -451,23 +719,31 @@ async function buildMatchResponse(env, match) {
 
     match: {
       id: match.id,
+
       mode: match.mode,
+
       region: match.region,
 
       player1: {
         uuid: match.player1_uuid,
         username: match.player1_username,
-        elo: Number(match.player1_elo)
+        elo: Number(
+          match.player1_elo
+        )
       },
 
       player2: {
         uuid: match.player2_uuid,
         username: match.player2_username,
-        elo: Number(match.player2_elo)
+        elo: Number(
+          match.player2_elo
+        )
       },
 
       status: match.status,
-      created_at: match.created_at
+
+      created_at:
+        match.created_at
     },
 
     server: server
@@ -486,160 +762,210 @@ async function buildMatchResponse(env, match) {
 // LEADERBOARD
 // =========================
 
-async function getOverallLeaderboard(env) {
-  /*
-  First get only the top 100 players
-  by combined ELO.
-  */
+async function getOverallLeaderboard(
+  env
+) {
+  const response =
+    await env.DB.prepare(`
+      SELECT
+        p.uuid,
+        p.username,
 
-  const response = await env.DB.prepare(`
-    SELECT
-      p.uuid,
-      p.username,
+        SUM(ps.elo) AS total_elo,
 
-      SUM(ps.elo) AS total_elo,
+        SUM(ps.wins) AS wins,
+        SUM(ps.losses) AS losses,
+        SUM(ps.games_played) AS games_played
 
-      SUM(ps.wins) AS wins,
-      SUM(ps.losses) AS losses,
-      SUM(ps.games_played) AS games_played
+      FROM players p
 
-    FROM players p
+      JOIN player_stats ps
+        ON p.uuid = ps.uuid
 
-    JOIN player_stats ps
-      ON p.uuid = ps.uuid
+      GROUP BY
+        p.uuid,
+        p.username
 
-    GROUP BY
-      p.uuid,
-      p.username
+      ORDER BY total_elo DESC
 
-    ORDER BY total_elo DESC
+      LIMIT 100
+    `)
+      .all();
 
-    LIMIT 100
-  `).all();
+  const players =
+    response.results || [];
 
-  const players = response.results || [];
-
-  if (players.length === 0) {
+  if (
+    players.length === 0
+  ) {
     return [];
   }
 
-  /*
-  Build placeholders only for the top 100 UUIDs.
-  This avoids loading every player's stats.
-  */
-
   const placeholders =
-    players.map(() => "?").join(", ");
+    players
+      .map(() => "?")
+      .join(", ");
 
   const uuids =
-    players.map(player => player.uuid);
+    players.map(
+      player => player.uuid
+    );
 
-  const statsResponse = await env.DB.prepare(`
-    SELECT
-      uuid,
-      mode,
-      elo
-    FROM player_stats
-    WHERE uuid IN (${placeholders})
-  `)
-    .bind(...uuids)
-    .all();
+  const statsResponse =
+    await env.DB.prepare(`
+      SELECT
+        uuid,
+        mode,
+        elo
+      FROM player_stats
+      WHERE uuid IN (${placeholders})
+    `)
+      .bind(...uuids)
+      .all();
 
-  const statsByPlayer = new Map();
+  const statsByPlayer =
+    new Map();
 
-  for (const stat of statsResponse.results || []) {
-    if (!statsByPlayer.has(stat.uuid)) {
-      statsByPlayer.set(stat.uuid, {});
+  for (
+    const stat
+    of statsResponse.results || []
+  ) {
+    if (
+      !statsByPlayer.has(
+        stat.uuid
+      )
+    ) {
+      statsByPlayer.set(
+        stat.uuid,
+        {}
+      );
     }
 
-    statsByPlayer.get(stat.uuid)[stat.mode] = {
-      elo: Number(stat.elo),
-      tier: getTierFromElo(Number(stat.elo))
-    };
+    statsByPlayer
+      .get(stat.uuid)[stat.mode] = {
+        elo: Number(stat.elo),
+
+        tier:
+          getTierFromElo(
+            Number(stat.elo)
+          )
+      };
   }
 
-  return players.map((player, index) => {
-    const playerModes =
-      statsByPlayer.get(player.uuid) || {};
-
-    const tiers = {};
-
-    for (const mode of MODES) {
-      const stats = playerModes[mode];
-
-      tiers[mode] = stats
-        ? {
-            elo: stats.elo,
-            tier: stats.tier
-          }
-        : {
-            elo: DEFAULT_ELO,
-            tier: getTierFromElo(DEFAULT_ELO)
-          };
-    }
-
-    const combinedElo =
-      Number(player.total_elo);
-
-    return {
-      rank: index + 1,
-
-      uuid: player.uuid,
-
-      username: player.username,
-
-      elo: combinedElo,
-
-      combined_elo: combinedElo,
-
-      wins: Number(player.wins),
-
-      losses: Number(player.losses),
-
-      games_played:
-        Number(player.games_played),
-
-      tiers
-    };
-  });
-}
-
-
-async function getModeLeaderboard(env, mode) {
-  const response = await env.DB.prepare(`
-    SELECT
-      p.uuid,
-      p.username,
-
-      ps.elo,
-      ps.wins,
-      ps.losses,
-      ps.games_played
-
-    FROM players p
-
-    JOIN player_stats ps
-      ON p.uuid = ps.uuid
-
-    WHERE ps.mode = ?
-
-    ORDER BY ps.elo DESC
-
-    LIMIT 100
-  `)
-    .bind(mode)
-    .all();
-
-  return (response.results || []).map(
+  return players.map(
     (player, index) => {
-      const elo = Number(player.elo);
+      const playerModes =
+        statsByPlayer.get(
+          player.uuid
+        ) || {};
+
+      const tiers = {};
+
+      for (
+        const mode
+        of MODES
+      ) {
+        const stats =
+          playerModes[mode];
+
+        tiers[mode] =
+          stats
+            ? {
+                elo: stats.elo,
+                tier: stats.tier
+              }
+            : {
+                elo: DEFAULT_ELO,
+                tier:
+                  getTierFromElo(
+                    DEFAULT_ELO
+                  )
+              };
+      }
+
+      const combinedElo =
+        Number(
+          player.total_elo
+        );
 
       return {
         rank: index + 1,
 
-        uuid: player.uuid,
+        uuid:
+          player.uuid,
 
-        username: player.username,
+        username:
+          player.username,
+
+        elo:
+          combinedElo,
+
+        combined_elo:
+          combinedElo,
+
+        wins:
+          Number(player.wins),
+
+        losses:
+          Number(player.losses),
+
+        games_played:
+          Number(
+            player.games_played
+          ),
+
+        tiers
+      };
+    }
+  );
+}
+
+
+async function getModeLeaderboard(
+  env,
+  mode
+) {
+  const response =
+    await env.DB.prepare(`
+      SELECT
+        p.uuid,
+        p.username,
+
+        ps.elo,
+        ps.wins,
+        ps.losses,
+        ps.games_played
+
+      FROM players p
+
+      JOIN player_stats ps
+        ON p.uuid = ps.uuid
+
+      WHERE ps.mode = ?
+
+      ORDER BY ps.elo DESC
+
+      LIMIT 100
+    `)
+      .bind(mode)
+      .all();
+
+  return (
+    response.results || []
+  ).map(
+    (player, index) => {
+      const elo =
+        Number(player.elo);
+
+      return {
+        rank:
+          index + 1,
+
+        uuid:
+          player.uuid,
+
+        username:
+          player.username,
 
         elo,
 
@@ -653,7 +979,9 @@ async function getModeLeaderboard(env, mode) {
           Number(player.losses),
 
         games_played:
-          Number(player.games_played)
+          Number(
+            player.games_played
+          )
       };
     }
   );
@@ -665,21 +993,47 @@ async function getModeLeaderboard(env, mode) {
 // =========================
 
 export default {
-  async fetch(request, env) {
+  async fetch(
+    request,
+    env
+  ) {
     try {
-      if (request.method === "OPTIONS") {
-        return new Response(null, {
-          status: 204,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+
+      // =========================
+      // OPTIONS
+      // =========================
+
+      if (
+        request.method ===
+        "OPTIONS"
+      ) {
+        return new Response(
+          null,
+          {
+            status: 204,
+
+            headers: {
+              "Access-Control-Allow-Origin":
+                "*",
+
+              "Access-Control-Allow-Methods":
+                "GET, POST, OPTIONS",
+
+              "Access-Control-Allow-Headers":
+                "Content-Type, Authorization"
+            }
           }
-        });
+        );
       }
 
-      const url = new URL(request.url);
-      const path = url.pathname;
+
+      const url =
+        new URL(
+          request.url
+        );
+
+      const path =
+        url.pathname;
 
 
       // =========================
@@ -692,10 +1046,18 @@ export default {
       ) {
         return json({
           success: true,
-          name: "SpicyTiers Ranked API",
-          version: "3.0.0",
-          database: "D1",
-          modes: MODES
+
+          name:
+            "SpicyTiers Ranked API",
+
+          version:
+            "3.0.0",
+
+          database:
+            "D1",
+
+          modes:
+            MODES
         });
       }
 
@@ -710,9 +1072,14 @@ export default {
       ) {
         return json({
           success: true,
-          status: "ok",
+
+          status:
+            "ok",
+
           timestamp:
-            Math.floor(Date.now() / 1000)
+            Math.floor(
+              Date.now() / 1000
+            )
         });
       }
 
@@ -725,23 +1092,41 @@ export default {
         request.method === "POST" &&
         path === "/player/sync"
       ) {
-        const body = await request.json();
+        const body =
+          await request.json();
 
-        const uuid = body.uuid;
-        const username = body.username;
+        const uuid =
+          body.uuid;
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        const username =
+          body.username;
+
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
-        if (!isValidUsername(username)) {
-          return json({
-            success: false,
-            error: "Invalid username"
-          }, 400);
+        if (
+          !isValidUsername(
+            username
+          )
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid username"
+            },
+            400
+          );
         }
 
         await ensurePlayer(
@@ -762,18 +1147,28 @@ export default {
 
       if (
         request.method === "GET" &&
-        path.startsWith("/player/")
+        path.startsWith(
+          "/player/"
+        )
       ) {
         const uuid =
           path
-            .substring("/player/".length)
+            .substring(
+              "/player/".length
+            )
             .trim();
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
         const player =
@@ -790,10 +1185,14 @@ export default {
             .first();
 
         if (!player) {
-          return json({
-            success: false,
-            error: "Player not found"
-          }, 404);
+          return json(
+            {
+              success: false,
+              error:
+                "Player not found"
+            },
+            404
+          );
         }
 
         const stats =
@@ -813,8 +1212,11 @@ export default {
 
         return json({
           success: true,
+
           player,
-          stats: stats.results || []
+
+          stats:
+            stats.results || []
         });
       }
 
@@ -825,7 +1227,9 @@ export default {
 
       if (
         request.method === "GET" &&
-        path.startsWith("/leaderboard/")
+        path.startsWith(
+          "/leaderboard/"
+        )
       ) {
         const mode =
           normalizeMode(
@@ -838,20 +1242,32 @@ export default {
           mode !== "overall" &&
           !validMode(mode)
         ) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid mode"
+            },
+            400
+          );
         }
 
-        if (mode === "overall") {
+        if (
+          mode === "overall"
+        ) {
           const results =
-            await getOverallLeaderboard(env);
+            await getOverallLeaderboard(
+              env
+            );
 
           return json({
             success: true,
-            mode: "overall",
-            leaderboard: results
+
+            mode:
+              "overall",
+
+            leaderboard:
+              results
           });
         }
 
@@ -863,8 +1279,11 @@ export default {
 
         return json({
           success: true,
+
           mode,
-          leaderboard: results
+
+          leaderboard:
+            results
         });
       }
 
@@ -877,153 +1296,398 @@ export default {
         request.method === "POST" &&
         path === "/queue/join"
       ) {
-        /*
-        Cleanup is only needed when
-        matchmaking happens, rather
-        than on every API request.
-        */
 
-        await cleanupStaleData(env);
+        try {
 
-        const body = await request.json();
-
-        const uuid = body.uuid;
-        const username = body.username;
-
-        const mode =
-          normalizeMode(body.mode);
-
-        const ranked =
-          body.ranked !== false;
-
-        const requestedRegion =
-          normalizeRegion(body.region);
-
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
-        }
-
-        if (!isValidUsername(username)) {
-          return json({
-            success: false,
-            error: "Invalid username"
-          }, 400);
-        }
-
-        if (!validMode(mode)) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
-        }
-
-        await ensurePlayer(
-          env,
-          uuid,
-          username
-        );
-
-        const stats =
-          await getPlayerStats(
-            env,
-            uuid,
-            mode
+          console.log(
+            "[QUEUE] ========================"
           );
 
-        if (!stats) {
-          return json({
-            success: false,
-            error: "Player stats not found"
-          }, 500);
-        }
+          console.log(
+            "[QUEUE] JOIN REQUEST"
+          );
 
-        let region =
-          requestedRegion;
+          await cleanupStaleData(
+            env
+          );
 
-        if (region === "auto") {
-          const autoServer =
+          const body =
+            await request.json();
+
+          console.log(
+            "[QUEUE] Body:",
+            body
+          );
+
+          const uuid =
+            body.uuid;
+
+          const username =
+            body.username;
+
+          const mode =
+            normalizeMode(
+              body.mode
+            );
+
+          const ranked =
+            body.ranked !== false;
+
+          const requestedRegion =
+            normalizeRegion(
+              body.region
+            );
+
+          if (
+            !isValidUUID(uuid)
+          ) {
+            return json(
+              {
+                success: false,
+                error:
+                  "Invalid UUID"
+              },
+              400
+            );
+          }
+
+          if (
+            !isValidUsername(
+              username
+            )
+          ) {
+            return json(
+              {
+                success: false,
+                error:
+                  "Invalid username"
+              },
+              400
+            );
+          }
+
+          if (
+            !validMode(mode)
+          ) {
+            return json(
+              {
+                success: false,
+                error:
+                  "Invalid mode"
+              },
+              400
+            );
+          }
+
+          console.log(
+            "[QUEUE] Ensuring player..."
+          );
+
+          await ensurePlayer(
+            env,
+            uuid,
+            username
+          );
+
+          console.log(
+            "[QUEUE] Getting stats..."
+          );
+
+          const stats =
+            await getPlayerStats(
+              env,
+              uuid,
+              mode
+            );
+
+          if (!stats) {
+            return json(
+              {
+                success: false,
+                error:
+                  "Player stats not found"
+              },
+              500
+            );
+          }
+
+          console.log(
+            "[QUEUE] Stats:",
+            stats
+          );
+
+          let region =
+            requestedRegion;
+
+          // -------------------------
+          // Auto region
+          // -------------------------
+
+          if (
+            region === "auto"
+          ) {
+            console.log(
+              "[QUEUE] Finding server for auto region..."
+            );
+
+            const autoServer =
+              await findServer(
+                env,
+                "auto"
+              );
+
+            if (autoServer) {
+              region =
+                normalizeRegion(
+                  autoServer.region
+                );
+            }
+
+            console.log(
+              "[QUEUE] Selected region:",
+              region
+            );
+          }
+
+
+          // -------------------------
+          // Existing queue
+          // -------------------------
+
+          console.log(
+            "[QUEUE] Checking existing queue..."
+          );
+
+          const existingQueue =
+            await env.DB.prepare(`
+              SELECT *
+              FROM queue
+              WHERE uuid = ?
+                AND mode = ?
+              LIMIT 1
+            `)
+              .bind(
+                uuid,
+                mode
+              )
+              .first();
+
+          if (
+            existingQueue
+          ) {
+            console.log(
+              "[QUEUE] Player already queued."
+            );
+
+            return json({
+              success: true,
+
+              queued: true,
+
+              matched: false,
+
+              already_queued:
+                true,
+
+              mode,
+
+              elo:
+                Number(
+                  stats.elo
+                ),
+
+              tier:
+                getTierFromElo(
+                  Number(stats.elo)
+                ),
+
+              region:
+                existingQueue.region,
+
+              queue_id:
+                existingQueue.id
+            });
+          }
+
+
+          // -------------------------
+          // Existing match
+          // -------------------------
+
+          console.log(
+            "[QUEUE] Checking existing match..."
+          );
+
+          const existingMatch =
+            await getMatchByPlayer(
+              env,
+              uuid
+            );
+
+          if (
+            existingMatch
+          ) {
+            console.log(
+              "[QUEUE] Existing match found:",
+              existingMatch.id
+            );
+
+            return await buildMatchResponse(
+              env,
+              existingMatch
+            );
+          }
+
+
+          // -------------------------
+          // Current player
+          // -------------------------
+
+          const player = {
+            uuid,
+
+            username,
+
+            mode,
+
+            ranked,
+
+            region,
+
+            elo:
+              Number(
+                stats.elo
+              )
+          };
+
+
+          // -------------------------
+          // Find opponent
+          // -------------------------
+
+          console.log(
+            "[QUEUE] Searching for opponent..."
+          );
+
+          const opponent =
+            await findMatch(
+              env,
+              uuid,
+              mode,
+              Number(stats.elo),
+              region
+            );
+
+
+          // =========================
+          // NO OPPONENT
+          // =========================
+
+          if (!opponent) {
+
+            console.log(
+              "[QUEUE] No opponent. Adding player to queue."
+            );
+
+            const now =
+              Math.floor(
+                Date.now() / 1000
+              );
+
+            const result =
+              await env.DB.prepare(`
+                INSERT INTO queue (
+                  uuid,
+                  username,
+                  mode,
+                  ranked,
+                  region,
+                  elo,
+                  joined_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+              `)
+                .bind(
+                  uuid,
+                  username,
+                  mode,
+                  ranked ? 1 : 0,
+                  region,
+                  Number(stats.elo),
+                  now
+                )
+                .run();
+
+            console.log(
+              "[QUEUE] Player queued:",
+              result
+            );
+
+            return json({
+              success: true,
+
+              queued: true,
+
+              matched: false,
+
+              status:
+                "queued",
+
+              mode,
+
+              elo:
+                Number(
+                  stats.elo
+                ),
+
+              tier:
+                getTierFromElo(
+                  Number(stats.elo)
+                ),
+
+              region,
+
+              queue_id:
+                result.meta
+                  .last_row_id
+            });
+          }
+
+
+          // =========================
+          // OPPONENT FOUND
+          // =========================
+
+          console.log(
+            "[QUEUE] Opponent found:",
+            opponent
+          );
+
+          // -------------------------
+          // Find duel server
+          // -------------------------
+
+          console.log(
+            "[QUEUE] Finding duel server..."
+          );
+
+          const server =
             await findServer(
               env,
-              "auto"
+              region
             );
 
-          if (autoServer) {
-            region =
-              normalizeRegion(
-                autoServer.region
+          if (!server) {
+
+            console.log(
+              "[QUEUE] No available duel server."
+            );
+
+            const now =
+              Math.floor(
+                Date.now() / 1000
               );
-          }
-        }
 
-        const existingQueue =
-          await env.DB.prepare(`
-            SELECT *
-            FROM queue
-            WHERE uuid = ?
-              AND mode = ?
-            LIMIT 1
-          `)
-            .bind(uuid, mode)
-            .first();
-
-        if (existingQueue) {
-          return json({
-            success: true,
-            queued: true,
-            matched: false,
-            already_queued: true,
-            mode,
-            elo: Number(stats.elo),
-            tier:
-              getTierFromElo(
-                Number(stats.elo)
-              ),
-            region: existingQueue.region,
-            queue_id: existingQueue.id
-          });
-        }
-
-        const existingMatch =
-          await getMatchByPlayer(
-            env,
-            uuid
-          );
-
-        if (existingMatch) {
-          return await buildMatchResponse(
-            env,
-            existingMatch
-          );
-        }
-
-        const player = {
-          uuid,
-          username,
-          mode,
-          ranked,
-          region,
-          elo: Number(stats.elo)
-        };
-
-        const opponent =
-          await findMatch(
-            env,
-            uuid,
-            mode,
-            Number(stats.elo),
-            region
-          );
-
-        if (!opponent) {
-          const now =
-            Math.floor(
-              Date.now() / 1000
-            );
-
-          const result =
             await env.DB.prepare(`
               INSERT INTO queue (
                 uuid,
@@ -1047,96 +1711,151 @@ export default {
               )
               .run();
 
-          return json({
-            success: true,
-            queued: true,
-            matched: false,
-            status: "queued",
-            mode,
-            elo: Number(stats.elo),
-            tier:
-              getTierFromElo(
-                Number(stats.elo)
-              ),
-            region,
-            queue_id:
-              result.meta.last_row_id
-          });
-        }
+            return json({
+              success: true,
 
-        const server =
-          await findServer(
-            env,
-            region
-          );
+              queued: true,
 
-        if (!server) {
-          const now =
-            Math.floor(
-              Date.now() / 1000
-            );
+              matched: false,
 
-          await env.DB.prepare(`
-            INSERT INTO queue (
-              uuid,
-              username,
+              status:
+                "waiting_for_server",
+
               mode,
-              ranked,
-              region,
-              elo,
-              joined_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-          `)
-            .bind(
-              uuid,
-              username,
-              mode,
-              ranked ? 1 : 0,
-              region,
-              Number(stats.elo),
-              now
-            )
-            .run();
 
-          return json({
-            success: true,
-            queued: true,
-            matched: false,
-            status:
-              "waiting_for_server",
-            mode,
-            elo:
-              Number(stats.elo),
-            tier:
-              getTierFromElo(
-                Number(stats.elo)
-              ),
-            region
-          });
-        }
+              elo:
+                Number(
+                  stats.elo
+                ),
 
-        const matchId =
-          await createMatch(
-            env,
-            player,
-            opponent,
+              tier:
+                getTierFromElo(
+                  Number(stats.elo)
+                ),
+
+              region
+            });
+          }
+
+
+          console.log(
+            "[QUEUE] Duel server found:",
             server
           );
 
-        const match =
-          await env.DB.prepare(`
-            SELECT *
-            FROM matches
-            WHERE id = ?
-          `)
-            .bind(matchId)
-            .first();
 
-        return await buildMatchResponse(
-          env,
-          match
-        );
+          // -------------------------
+          // Create match
+          // -------------------------
+
+          const matchId =
+            await createMatch(
+              env,
+              player,
+              opponent,
+              server
+            );
+
+
+          console.log(
+            "[QUEUE] Match created:",
+            matchId
+          );
+
+
+          // -------------------------
+          // Load match
+          // -------------------------
+
+          const match =
+            await env.DB.prepare(`
+              SELECT *
+              FROM matches
+              WHERE id = ?
+              LIMIT 1
+            `)
+              .bind(
+                matchId
+              )
+              .first();
+
+          if (!match) {
+            throw new Error(
+              "Match was created but could not be loaded afterwards: " +
+              matchId
+            );
+          }
+
+
+          console.log(
+            "[QUEUE] Match loaded:",
+            match
+          );
+
+
+          // -------------------------
+          // Build response
+          // -------------------------
+
+          const response =
+            await buildMatchResponse(
+              env,
+              match
+            );
+
+          console.log(
+            "[QUEUE] MATCH SUCCESS:",
+            response
+          );
+
+          return json(
+            response
+          );
+
+        } catch (error) {
+
+          console.error(
+            "[QUEUE] ========================"
+          );
+
+          console.error(
+            "[QUEUE] QUEUE JOIN FAILED"
+          );
+
+          console.error(
+            "[QUEUE] Error name:",
+            error?.name
+          );
+
+          console.error(
+            "[QUEUE] Error message:",
+            error?.message
+          );
+
+          console.error(
+            "[QUEUE] Error stack:",
+            error?.stack
+          );
+
+          console.error(
+            "[QUEUE] Full error:",
+            error
+          );
+
+          return json(
+            {
+              success: false,
+
+              error:
+                "Queue matchmaking failed",
+
+              details:
+                error?.message ||
+                String(error)
+            },
+            500
+          );
+        }
       }
 
 
@@ -1149,13 +1868,21 @@ export default {
         path === "/queue/status"
       ) {
         const uuid =
-          url.searchParams.get("uuid");
+          url.searchParams.get(
+            "uuid"
+          );
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
         const queue =
@@ -1191,6 +1918,7 @@ export default {
 
         return json({
           success: true,
+
           queued: true,
 
           queue: {
@@ -1199,8 +1927,11 @@ export default {
             wait_time:
               Math.max(
                 0,
+
                 now -
-                Number(queue.joined_at)
+                Number(
+                  queue.joined_at
+                )
               )
           }
         });
@@ -1222,23 +1953,35 @@ export default {
           body.uuid;
 
         const mode =
-          normalizeMode(body.mode);
+          normalizeMode(
+            body.mode
+          );
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
         if (
           mode &&
           !validMode(mode)
         ) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid mode"
+            },
+            400
+          );
         }
 
         let result;
@@ -1261,14 +2004,18 @@ export default {
               DELETE FROM queue
               WHERE uuid = ?
             `)
-              .bind(uuid)
+              .bind(
+                uuid
+              )
               .run();
         }
 
         return json({
           success: true,
+
           removed:
-            result.meta.changes || 0
+            result.meta.changes ||
+            0
         });
       }
 
@@ -1282,13 +2029,21 @@ export default {
         path === "/match/status"
       ) {
         const uuid =
-          url.searchParams.get("uuid");
+          url.searchParams.get(
+            "uuid"
+          );
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
         const match =
@@ -1300,13 +2055,16 @@ export default {
         if (!match) {
           return json({
             success: true,
+
             matched: false
           });
         }
 
-        return await buildMatchResponse(
-          env,
-          match
+        return json(
+          await buildMatchResponse(
+            env,
+            match
+          )
         );
       }
 
@@ -1322,7 +2080,8 @@ export default {
         const body =
           await request.json();
 
-        const name = body.name;
+        const name =
+          body.name;
 
         const region =
           normalizeRegion(
@@ -1336,34 +2095,46 @@ export default {
           body.online !== false;
 
         const players =
-          Number(body.players || 0);
+          Number(
+            body.players || 0
+          );
 
         const maxPlayers =
           Number(
-            body.max_players || 100
+            body.max_players ||
+            100
           );
 
         const apiKey =
-          body.api_key || null;
+          body.api_key ||
+          null;
 
         if (
           typeof name !== "string" ||
           !name.trim()
         ) {
-          return json({
-            success: false,
-            error: "Invalid server name"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid server name"
+            },
+            400
+          );
         }
 
         if (
           typeof address !== "string" ||
           !address.trim()
         ) {
-          return json({
-            success: false,
-            error: "Invalid server address"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid server address"
+            },
+            400
+          );
         }
 
         const now =
@@ -1382,6 +2153,7 @@ export default {
             .first();
 
         if (existing) {
+
           await env.DB.prepare(`
             UPDATE servers
             SET
@@ -1396,19 +2168,28 @@ export default {
           `)
             .bind(
               region,
+
               address,
+
               online ? 1 : 0,
+
               players,
+
               maxPlayers,
+
               now,
+
               apiKey,
+
               existing.id
             )
             .run();
 
           return json({
             success: true,
-            server_id: existing.id
+
+            server_id:
+              existing.id
           });
         }
 
@@ -1429,18 +2210,26 @@ export default {
           `)
             .bind(
               name,
+
               region,
+
               address,
+
               online ? 1 : 0,
+
               players,
+
               maxPlayers,
+
               now,
+
               apiKey
             )
             .run();
 
         return json({
           success: true,
+
           server_id:
             result.meta.last_row_id
         });
@@ -1465,10 +2254,14 @@ export default {
           typeof name !== "string" ||
           !name.trim()
         ) {
-          return json({
-            success: false,
-            error: "Invalid server name"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid server name"
+            },
+            400
+          );
         }
 
         await env.DB.prepare(`
@@ -1503,35 +2296,52 @@ export default {
           body.winner_uuid;
 
         const serverId =
-          Number(body.server_id);
+          Number(
+            body.server_id
+          );
 
         const apiKey =
           body.api_key;
 
         if (
-          typeof matchId !== "string" ||
+          typeof matchId !==
+            "string" ||
           !matchId
         ) {
-          return json({
-            success: false,
-            error: "Invalid match_id"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid match_id"
+            },
+            400
+          );
         }
 
         if (
-          !isValidUUID(winnerUUID)
+          !isValidUUID(
+            winnerUUID
+          )
         ) {
-          return json({
-            success: false,
-            error: "Invalid winner UUID"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid winner UUID"
+            },
+            400
+          );
         }
 
         if (!serverId) {
-          return json({
-            success: false,
-            error: "Invalid server_id"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid server_id"
+            },
+            400
+          );
         }
 
         const server =
@@ -1540,24 +2350,34 @@ export default {
             FROM servers
             WHERE id = ?
           `)
-            .bind(serverId)
+            .bind(
+              serverId
+            )
             .first();
 
         if (!server) {
-          return json({
-            success: false,
-            error: "Server not found"
-          }, 404);
+          return json(
+            {
+              success: false,
+              error:
+                "Server not found"
+            },
+            404
+          );
         }
 
         if (
           server.api_key &&
           server.api_key !== apiKey
         ) {
-          return json({
-            success: false,
-            error: "Invalid API key"
-          }, 403);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid API key"
+            },
+            403
+          );
         }
 
         const match =
@@ -1566,34 +2386,49 @@ export default {
             FROM matches
             WHERE id = ?
           `)
-            .bind(matchId)
+            .bind(
+              matchId
+            )
             .first();
 
         if (!match) {
-          return json({
-            success: false,
-            error: "Match not found"
-          }, 404);
+          return json(
+            {
+              success: false,
+              error:
+                "Match not found"
+            },
+            404
+          );
         }
 
         if (
-          Number(match.server_id) !==
-          serverId
+          Number(
+            match.server_id
+          ) !== serverId
         ) {
-          return json({
-            success: false,
-            error: "Invalid server for match"
-          }, 403);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid server for match"
+            },
+            403
+          );
         }
 
         if (
-          match.status !== "waiting"
+          match.status !==
+          "waiting"
         ) {
-          return json({
-            success: false,
-            error:
-              "Match already finished"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Match already finished"
+            },
+            400
+          );
         }
 
         const isPlayer1 =
@@ -1608,11 +2443,14 @@ export default {
           !isPlayer1 &&
           !isPlayer2
         ) {
-          return json({
-            success: false,
-            error:
-              "Winner is not in match"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Winner is not in match"
+            },
+            400
+          );
         }
 
         const loserUUID =
@@ -1641,18 +2479,25 @@ export default {
           !winnerStats ||
           !loserStats
         ) {
-          return json({
-            success: false,
-            error:
-              "Player stats not found"
-          }, 500);
+          return json(
+            {
+              success: false,
+              error:
+                "Player stats not found"
+            },
+            500
+          );
         }
 
         const winnerOldElo =
-          Number(winnerStats.elo);
+          Number(
+            winnerStats.elo
+          );
 
         const loserOldElo =
-          Number(loserStats.elo);
+          Number(
+            loserStats.elo
+          );
 
         const winnerNewElo =
           winnerOldElo +
@@ -1661,6 +2506,7 @@ export default {
         const loserNewElo =
           Math.max(
             0,
+
             loserOldElo -
             ELO_CHANGE
           );
@@ -1680,7 +2526,9 @@ export default {
         `)
           .bind(
             winnerUUID,
+
             now,
+
             matchId
           )
           .run();
@@ -1697,7 +2545,9 @@ export default {
         `)
           .bind(
             winnerNewElo,
+
             winnerUUID,
+
             winnerMode
           )
           .run();
@@ -1714,7 +2564,9 @@ export default {
         `)
           .bind(
             loserNewElo,
+
             loserUUID,
+
             winnerMode
           )
           .run();
@@ -1724,23 +2576,37 @@ export default {
           SET reserved_players =
             MAX(
               0,
-              reserved_players - 2
+              COALESCE(
+                reserved_players,
+                0
+              ) - 2
             )
           WHERE id = ?
         `)
-          .bind(serverId)
+          .bind(
+            serverId
+          )
           .run();
 
         return json({
           success: true,
 
-          match_id: matchId,
+          match_id:
+            matchId,
 
           winner: {
-            uuid: winnerUUID,
-            old_elo: winnerOldElo,
-            new_elo: winnerNewElo,
-            elo_change: ELO_CHANGE,
+            uuid:
+              winnerUUID,
+
+            old_elo:
+              winnerOldElo,
+
+            new_elo:
+              winnerNewElo,
+
+            elo_change:
+              ELO_CHANGE,
+
             tier:
               getTierFromElo(
                 winnerNewElo
@@ -1748,10 +2614,18 @@ export default {
           },
 
           loser: {
-            uuid: loserUUID,
-            old_elo: loserOldElo,
-            new_elo: loserNewElo,
-            elo_change: -ELO_CHANGE,
+            uuid:
+              loserUUID,
+
+            old_elo:
+              loserOldElo,
+
+            new_elo:
+              loserNewElo,
+
+            elo_change:
+              -ELO_CHANGE,
+
             tier:
               getTierFromElo(
                 loserNewElo
@@ -1770,25 +2644,41 @@ export default {
         path === "/kit/layout"
       ) {
         const uuid =
-          url.searchParams.get("uuid");
+          url.searchParams.get(
+            "uuid"
+          );
 
         const mode =
           normalizeMode(
-            url.searchParams.get("mode")
+            url.searchParams.get(
+              "mode"
+            )
           );
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
-        if (!validMode(mode)) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
+        if (
+          !validMode(mode)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid mode"
+            },
+            400
+          );
         }
 
         const layout =
@@ -1811,7 +2701,9 @@ export default {
         if (!layout) {
           return json({
             success: true,
+
             found: false,
+
             layout: null
           });
         }
@@ -1829,8 +2721,12 @@ export default {
 
         return json({
           success: true,
+
           found: true,
-          layout: parsedLayout,
+
+          layout:
+            parsedLayout,
+
           updated_at:
             layout.updated_at
         });
@@ -1859,33 +2755,52 @@ export default {
         const layout =
           body.layout;
 
-        if (!isValidUUID(uuid)) {
-          return json({
-            success: false,
-            error: "Invalid UUID"
-          }, 400);
+        if (
+          !isValidUUID(uuid)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid UUID"
+            },
+            400
+          );
         }
 
-        if (!validMode(mode)) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
+        if (
+          !validMode(mode)
+        ) {
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid mode"
+            },
+            400
+          );
         }
 
         if (
           !layout ||
-          typeof layout !== "object" ||
+          typeof layout !==
+            "object" ||
           Array.isArray(layout)
         ) {
-          return json({
-            success: false,
-            error: "Invalid layout"
-          }, 400);
+          return json(
+            {
+              success: false,
+              error:
+                "Invalid layout"
+            },
+            400
+          );
         }
 
         const entries =
-          Object.entries(layout);
+          Object.entries(
+            layout
+          );
 
         for (
           const [slot, item]
@@ -1895,27 +2810,38 @@ export default {
             Number(slot);
 
           if (
-            !Number.isInteger(slotNumber) ||
+            !Number.isInteger(
+              slotNumber
+            ) ||
             slotNumber < 0 ||
             slotNumber > 40
           ) {
-            return json({
-              success: false,
-              error:
-                "Invalid slot: " +
-                slot
-            }, 400);
+            return json(
+              {
+                success: false,
+
+                error:
+                  "Invalid slot: " +
+                  slot
+              },
+              400
+            );
           }
 
           if (
-            typeof item !== "string"
+            typeof item !==
+            "string"
           ) {
-            return json({
-              success: false,
-              error:
-                "Invalid item at slot " +
-                slot
-            }, 400);
+            return json(
+              {
+                success: false,
+
+                error:
+                  "Invalid item at slot " +
+                  slot
+              },
+              400
+            );
           }
         }
 
@@ -1948,23 +2874,36 @@ export default {
 
           ON CONFLICT(uuid, mode)
           DO UPDATE SET
-            layout = excluded.layout,
-            updated_at = excluded.updated_at
+            layout =
+              excluded.layout,
+
+            updated_at =
+              excluded.updated_at
         `)
           .bind(
             uuid,
+
             mode,
-            JSON.stringify(layout),
+
+            JSON.stringify(
+              layout
+            ),
+
             now
           )
           .run();
 
         return json({
           success: true,
+
           saved: true,
+
           uuid,
+
           mode,
-          updated_at: now
+
+          updated_at:
+            now
         });
       }
 
@@ -1973,532 +2912,72 @@ export default {
       // 404
       // =========================
 
-      return json({
-        success: false,
-        error: "Not found"
-      }, 404);
+      return json(
+        {
+          success: false,
+          error:
+            "Not found"
+        },
+        404
+      );
 
     } catch (error) {
+
+      // =========================
+      // GLOBAL ERROR
+      // =========================
+
       console.error(
-        "[SpicyTiers API] Error:",
+        "[SpicyTiers API] ========================"
+      );
+
+      console.error(
+        "[SpicyTiers API] UNHANDLED ERROR"
+      );
+
+      console.error(
+        "[SpicyTiers API] name:",
+        error?.name
+      );
+
+      console.error(
+        "[SpicyTiers API] message:",
+        error?.message
+      );
+
+      console.error(
+        "[SpicyTiers API] stack:",
+        error?.stack
+      );
+
+      console.error(
+        "[SpicyTiers API] error:",
         error
       );
 
-      return json({
-        success: false,
-        error: "Internal server error",
-        details:
+      let details =
+        "Unknown error";
+
+      try {
+        details =
           error?.message ||
-          String(error)
-      }, 500);
+          String(error);
+      } catch {
+        details =
+          "Failed to read error";
+      }
+
+      return json(
+        {
+          success: false,
+
+          error:
+            "Internal server error",
+
+          details
+        },
+        500
+      );
     }
   }
 };
-```
-
-### 2. `leaderboard.js`
-
-```js
-const API_URL =
-    "https://spicytiersranked.strahinjapile2013.workers.dev";
-
-const MODE_INFO = {
-    sword: {
-        name: "Sword",
-        icon: "⚔"
-    },
-
-    axe: {
-        name: "Axe",
-        icon: "🪓"
-    },
-
-    mace: {
-        name: "Mace",
-        icon: "🔨"
-    },
-
-    pot: {
-        name: "Pot",
-        icon: "🧪"
-    },
-
-    uhc: {
-        name: "UHC",
-        icon: "❤"
-    },
-
-    vanilla: {
-        name: "Vanilla",
-        icon: "✦"
-    },
-
-    smp: {
-        name: "SMP",
-        icon: "⛊"
-    },
-
-    nethop: {
-        name: "Netherite OP",
-        icon: "⚔"
-    }
-};
-
-
-const TIER_CLASSES = {
-    UNRANKED: "tier-unranked",
-
-    LT5: "tier-lt5",
-    HT5: "tier-ht5",
-
-    LT4: "tier-lt4",
-    HT4: "tier-ht4",
-
-    LT3: "tier-lt3",
-    HT3: "tier-ht3",
-
-    LT2: "tier-lt2",
-    HT2: "tier-ht2",
-
-    LT1: "tier-lt1",
-    HT1: "tier-ht1"
-};
-
-
-let currentPlayers = [];
-
-
-// =========================
-// ELEMENTS
-// =========================
-
-const searchInput =
-    document.getElementById("searchInput");
-
-const modeSelect =
-    document.getElementById("modeSelect");
-
-const leaderboardList =
-    document.getElementById("leaderboardList");
-
-const currentModeTitle =
-    document.getElementById("currentModeTitle");
-
-const leaderboardHead =
-    document.querySelector(".leaderboard-head");
-
-
-// =========================
-// TIER
-// =========================
-
-function getTierFromElo(elo) {
-    elo = Number(elo);
-
-    if (elo >= 2250) return "HT1";
-    if (elo >= 2000) return "LT1";
-    if (elo >= 1900) return "HT2";
-    if (elo >= 1800) return "LT2";
-    if (elo >= 1650) return "HT3";
-    if (elo >= 1500) return "LT3";
-    if (elo >= 1300) return "HT4";
-    if (elo >= 1200) return "LT4";
-    if (elo >= 1100) return "HT5";
-    if (elo >= 1000) return "LT5";
-
-    return "UNRANKED";
-}
-
-
-function getTierClass(tier) {
-    return (
-        TIER_CLASSES[tier] ||
-        "tier-unranked"
-    );
-}
-
-
-// =========================
-// AVATAR
-// =========================
-
-function getAvatar(username) {
-    return (
-        "https://mc-heads.net/avatar/" +
-        encodeURIComponent(username) +
-        "/100"
-    );
-}
-
-
-// =========================
-// ESCAPE HTML
-// =========================
-
-function escapeHtml(value) {
-    return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#039;");
-}
-
-
-// =========================
-// OVERALL TIER
-// =========================
-
-function createOverallTiers(player) {
-    const tiers = player.tiers || {};
-
-    return Object.keys(MODE_INFO)
-        .map(mode => {
-            const info =
-                MODE_INFO[mode];
-
-            const stats =
-                tiers[mode] || {
-                    elo: 1000,
-                    tier: "LT5"
-                };
-
-            const tier =
-                stats.tier ||
-                getTierFromElo(
-                    stats.elo
-                );
-
-            return `
-                <span
-                    class="overall-tier ${getTierClass(tier)}"
-                    title="${escapeHtml(info.name)} — ${Number(stats.elo)} ELO"
-                >
-                    <span class="tier-icon">
-                        ${info.icon}
-                    </span>
-
-                    <span>
-                        ${escapeHtml(tier)}
-                    </span>
-                </span>
-            `;
-        })
-        .join("");
-}
-
-
-// =========================
-// OVERALL ROW
-// =========================
-
-function createOverallRow(player) {
-    const combinedElo =
-        Number(
-            player.combined_elo ??
-            player.elo ??
-            0
-        );
-
-    return `
-        <div
-            class="player-row overall-row"
-            data-uuid="${escapeHtml(player.uuid)}"
-            data-username="${escapeHtml(player.username)}"
-        >
-
-            <div class="player-rank">
-                #${player.rank}
-            </div>
-
-            <div class="player-info">
-                <img
-                    class="player-avatar"
-                    src="${getAvatar(player.username)}"
-                    alt="${escapeHtml(player.username)}"
-                    loading="lazy"
-                >
-
-                <div class="player-name">
-                    ${escapeHtml(player.username)}
-                </div>
-            </div>
-
-            <div class="player-tiers">
-                ${createOverallTiers(player)}
-            </div>
-
-            <div class="player-elo">
-                ${combinedElo} ELO
-            </div>
-
-        </div>
-    `;
-}
-
-
-// =========================
-// MODE ROW
-// =========================
-
-function createModeRow(player) {
-    const elo =
-        Number(player.elo || 0);
-
-    const tier =
-        player.tier ||
-        getTierFromElo(elo);
-
-    return `
-        <div
-            class="player-row mode-row"
-            data-uuid="${escapeHtml(player.uuid)}"
-            data-username="${escapeHtml(player.username)}"
-        >
-
-            <div class="player-rank">
-                #${player.rank}
-            </div>
-
-            <div class="player-info">
-                <img
-                    class="player-avatar"
-                    src="${getAvatar(player.username)}"
-                    alt="${escapeHtml(player.username)}"
-                    loading="lazy"
-                >
-
-                <div class="player-name">
-                    ${escapeHtml(player.username)}
-                </div>
-            </div>
-
-            <div
-                class="player-tier ${getTierClass(tier)}"
-            >
-                ${escapeHtml(tier)}
-            </div>
-
-            <div class="player-elo">
-                ${elo} ELO
-            </div>
-
-        </div>
-    `;
-}
-
-
-// =========================
-// RENDER
-// =========================
-
-function renderLeaderboard(players) {
-    if (!leaderboardList) {
-        return;
-    }
-
-    if (!players.length) {
-        leaderboardList.innerHTML = `
-            <div class="leaderboard-empty">
-                No players found.
-            </div>
-        `;
-
-        return;
-    }
-
-    const mode =
-        modeSelect?.value ||
-        "overall";
-
-    if (mode === "overall") {
-        leaderboardHead?.classList.add(
-            "overall-head"
-        );
-
-        leaderboardList.innerHTML =
-            players
-                .map(createOverallRow)
-                .join("");
-    } else {
-        leaderboardHead?.classList.remove(
-            "overall-head"
-        );
-
-        leaderboardList.innerHTML =
-            players
-                .map(createModeRow)
-                .join("");
-    }
-
-    document
-        .querySelectorAll(".player-row")
-        .forEach(row => {
-            row.addEventListener(
-                "click",
-                () => {
-                    const uuid =
-                        row.dataset.uuid;
-
-                    if (!uuid) {
-                        return;
-                    }
-
-                    window.location.href =
-                        `player.html?uuid=${encodeURIComponent(uuid)}`;
-                }
-            );
-        });
-}
-
-
-// =========================
-// SEARCH
-// =========================
-
-function filterPlayers() {
-    const query =
-        (
-            searchInput?.value ||
-            ""
-        )
-            .trim()
-            .toLowerCase();
-
-    if (!query) {
-        renderLeaderboard(
-            currentPlayers
-        );
-
-        return;
-    }
-
-    const filtered =
-        currentPlayers.filter(
-            player =>
-                String(
-                    player.username || ""
-                )
-                    .toLowerCase()
-                    .includes(query)
-        );
-
-    renderLeaderboard(filtered);
-}
-
-
-// =========================
-// LOAD
-// =========================
-
-async function loadLeaderboard() {
-    const mode =
-        modeSelect?.value ||
-        "overall";
-
-    if (currentModeTitle) {
-        if (mode === "overall") {
-            currentModeTitle.textContent =
-                "Overall";
-        } else {
-            currentModeTitle.textContent =
-                MODE_INFO[mode]?.name ||
-                mode;
-        }
-    }
-
-    if (leaderboardList) {
-        leaderboardList.innerHTML = `
-            <div class="leaderboard-loading">
-                Loading leaderboard...
-            </div>
-        `;
-    }
-
-    try {
-        const response =
-            await fetch(
-                `${API_URL}/leaderboard/${encodeURIComponent(mode)}`,
-                {
-                    method: "GET",
-                    cache: "no-store"
-                }
-            );
-
-        if (!response.ok) {
-            throw new Error(
-                `HTTP ${response.status}`
-            );
-        }
-
-        const data =
-            await response.json();
-
-        if (
-            !data ||
-            data.success !== true
-        ) {
-            throw new Error(
-                data?.error ||
-                "API request failed"
-            );
-        }
-
-        currentPlayers =
-            Array.isArray(
-                data.leaderboard
-            )
-                ? data.leaderboard
-                : [];
-
-        filterPlayers();
-
-    } catch (error) {
-        console.error(
-            "[SpicyTiers Leaderboard]",
-            error
-        );
-
-        currentPlayers = [];
-
-        if (leaderboardList) {
-            leaderboardList.innerHTML = `
-                <div class="leaderboard-error">
-                    Failed to load leaderboard.
-                </div>
-            `;
-        }
-    }
-}
-
-
-// =========================
-// EVENTS
-// =========================
-
-searchInput?.addEventListener(
-    "input",
-    filterPlayers
-);
-
-modeSelect?.addEventListener(
-    "change",
-    loadLeaderboard
-);
-
-
-// =========================
-// INITIAL LOAD
-// =========================
-
-loadLeaderboard();
-
-
-// =========================
-// OPTIONAL AUTO REFRESH
-// =========================
-
-setInterval(
-    loadLeaderboard,
-    30000
-);
