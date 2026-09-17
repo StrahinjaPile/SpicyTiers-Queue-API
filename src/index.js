@@ -670,114 +670,356 @@ export default {
       }
 
 
-      // =========================
-      // LEADERBOARD
-      // =========================
+// =========================
+// LEADERBOARD
+// =========================
 
-      if (
-        request.method === "GET" &&
-        path.startsWith("/leaderboard/")
-      ) {
-        const mode = normalizeMode(
-          path.substring(
-            "/leaderboard/".length
+if (
+  request.method === "GET" &&
+  path.startsWith("/leaderboard/")
+) {
+  const mode = normalizeMode(
+    path.substring(
+      "/leaderboard/".length
+    )
+  );
+
+
+  if (
+    mode !== "overall" &&
+    !validMode(mode)
+  ) {
+    return json({
+      success: false,
+      error: "Invalid mode"
+    }, 400);
+  }
+
+
+  // =========================
+  // OVERALL
+  // =========================
+
+  if (mode === "overall") {
+
+    const response =
+      await env.DB.prepare(`
+        SELECT
+          p.uuid,
+          p.username,
+
+          SUM(ps.elo) AS total_elo,
+
+          SUM(ps.wins) AS wins,
+          SUM(ps.losses) AS losses,
+          SUM(ps.games_played) AS games_played
+
+        FROM players p
+
+        JOIN player_stats ps
+          ON p.uuid = ps.uuid
+
+        GROUP BY
+          p.uuid,
+          p.username
+
+        ORDER BY total_elo DESC
+
+        LIMIT 100
+      `)
+        .all();
+
+
+    const players =
+      response.results || [];
+
+
+    /*
+    =========================
+    GET ALL MODE STATS
+    =========================
+    */
+
+    const uuids =
+      players.map(
+        player => player.uuid
+      );
+
+
+    let statsByPlayer =
+      new Map();
+
+
+    if (uuids.length > 0) {
+
+      /*
+      D1 does not support binding
+      an arbitrary array directly,
+      so fetch the stats in one query
+      and group them in JavaScript.
+      */
+
+      const statsResponse =
+        await env.DB.prepare(`
+          SELECT
+            uuid,
+            mode,
+            elo
+          FROM player_stats
+          WHERE mode IN (
+            'sword',
+            'axe',
+            'mace',
+            'pot',
+            'uhc',
+            'vanilla',
+            'smp',
+            'nethop'
           )
-        );
+        `)
+          .all();
+
+
+      for (
+        const stat
+        of statsResponse.results || []
+      ) {
+
+        /*
+        Only keep players that are
+        actually in the leaderboard.
+        */
+
+        if (
+          !uuids.includes(
+            stat.uuid
+          )
+        ) {
+          continue;
+        }
 
 
         if (
-          mode !== "overall" &&
-          !validMode(mode)
+          !statsByPlayer.has(
+            stat.uuid
+          )
         ) {
-          return json({
-            success: false,
-            error: "Invalid mode"
-          }, 400);
+
+          statsByPlayer.set(
+            stat.uuid,
+            {}
+          );
+
         }
 
 
-        let results;
-
-
-        if (mode === "overall") {
-          const response =
-            await env.DB.prepare(`
-              SELECT
-                p.uuid,
-                p.username,
-                SUM(ps.wins) AS wins,
-                SUM(ps.losses) AS losses,
-                SUM(ps.games_played) AS games_played,
-                SUM(ps.elo) AS total_elo
-              FROM players p
-              JOIN player_stats ps
-                ON p.uuid = ps.uuid
-              GROUP BY
-                p.uuid,
-                p.username
-              ORDER BY total_elo DESC
-              LIMIT 100
-            `)
-              .all();
-
-
-          results = (
-            response.results || []
-          ).map((player, index) => ({
-            rank: index + 1,
-            uuid: player.uuid,
-            username: player.username,
-            elo: player.total_elo,
-            wins: player.wins,
-            losses: player.losses,
-            games_played: player.games_played
-          }));
-        } else {
-          const response =
-            await env.DB.prepare(`
-              SELECT
-                p.uuid,
-                p.username,
-                ps.elo,
-                ps.wins,
-                ps.losses,
-                ps.games_played
-              FROM players p
-              JOIN player_stats ps
-                ON p.uuid = ps.uuid
-              WHERE ps.mode = ?
-              ORDER BY ps.elo DESC
-              LIMIT 100
-            `)
-              .bind(mode)
-              .all();
-
-
-          results = (
-            response.results || []
-          ).map((player, index) => ({
-            rank: index + 1,
-            uuid: player.uuid,
-            username: player.username,
-            elo: player.elo,
+        statsByPlayer
+          .get(stat.uuid)[stat.mode] = {
+            elo: Number(stat.elo),
             tier: getTierFromElo(
-              Number(player.elo)
-            ),
-            wins: player.wins,
-            losses: player.losses,
-            games_played: player.games_played
-          }));
-        }
+              Number(stat.elo)
+            )
+          };
 
-
-        return json({
-          success: true,
-          mode,
-          leaderboard: results
-        });
       }
 
+    }
 
+
+    /*
+    =========================
+    BUILD OVERALL LEADERBOARD
+    =========================
+    */
+
+    const results =
+      players.map(
+        (player, index) => {
+
+          const playerModes =
+            statsByPlayer.get(
+              player.uuid
+            ) || {};
+
+
+          /*
+          Make sure every mode
+          always exists.
+          */
+
+          const tiers = {};
+
+
+          for (
+            const gameMode
+            of MODES
+          ) {
+
+            const stats =
+              playerModes[gameMode];
+
+
+            tiers[gameMode] =
+              stats
+                ? {
+                    elo: stats.elo,
+                    tier: stats.tier
+                  }
+                : {
+                    elo: DEFAULT_ELO,
+                    tier:
+                      getTierFromElo(
+                        DEFAULT_ELO
+                      )
+                  };
+
+          }
+
+
+          return {
+            rank: index + 1,
+
+            uuid:
+              player.uuid,
+
+            username:
+              player.username,
+
+            /*
+            Combined ELO
+            */
+
+            elo:
+              Number(
+                player.total_elo
+              ),
+
+            combined_elo:
+              Number(
+                player.total_elo
+              ),
+
+            wins:
+              Number(
+                player.wins
+              ),
+
+            losses:
+              Number(
+                player.losses
+              ),
+
+            games_played:
+              Number(
+                player.games_played
+              ),
+
+            /*
+            All 8 mode tiers
+            */
+
+            tiers
+
+          };
+
+        }
+      );
+
+
+    return json({
+      success: true,
+      mode: "overall",
+      leaderboard: results
+    });
+
+  }
+
+
+  // =========================
+  // SINGLE MODE
+  // =========================
+
+  const response =
+    await env.DB.prepare(`
+      SELECT
+        p.uuid,
+        p.username,
+
+        ps.elo,
+        ps.wins,
+        ps.losses,
+        ps.games_played
+
+      FROM players p
+
+      JOIN player_stats ps
+        ON p.uuid = ps.uuid
+
+      WHERE ps.mode = ?
+
+      ORDER BY ps.elo DESC
+
+      LIMIT 100
+    `)
+      .bind(mode)
+      .all();
+
+
+  const results =
+    (
+      response.results || []
+    ).map(
+      (player, index) => {
+
+        const elo =
+          Number(
+            player.elo
+          );
+
+
+        return {
+          rank:
+            index + 1,
+
+          uuid:
+            player.uuid,
+
+          username:
+            player.username,
+
+          elo,
+
+          tier:
+            getTierFromElo(
+              elo
+            ),
+
+          wins:
+            Number(
+              player.wins
+            ),
+
+          losses:
+            Number(
+              player.losses
+            ),
+
+          games_played:
+            Number(
+              player.games_played
+            )
+        };
+
+      }
+    );
+
+
+  return json({
+    success: true,
+    mode,
+    leaderboard: results
+  });
+}
       // =========================
       // QUEUE JOIN
       // =========================
